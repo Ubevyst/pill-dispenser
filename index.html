@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pill Dispenser Control</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.2.6/mqtt.min.js"></script>
+</head>
+<body>
+    <h1>Pill Dispenser Control Panel</h1>
+    
+    <button onclick="dispensePill()">Dispense Pill</button>
+    <p>Status: <span id="status">Waiting...</span></p>
+    
+    <h2>Live Camera Feed</h2>
+    <img id="cameraFeed" src="http://YOUR_ESP32_CAM_IP/" width="400" />
+    
+    <script>
+        // MQTT Configuration
+        const broker = "wss://f8ce84ba874c4225b531260f66793bc4.s1.eu.hivemq.cloud:8884/mqtt";
+        const options = {
+            username: "Aphelios",
+            password: "Edgviper2021",
+            protocol: "wss"
+        };
+
+        const client = mqtt.connect(broker, options);
+
+        client.on("connect", function () {
+            console.log("Connected to MQTT Broker");
+            document.getElementById("status").innerText = "Connected";
+        });
+
+        function dispensePill() {
+            client.publish("pill/dispenser", "dispense");
+            alert("Pill dispense command sent!");
+        }
+    </script>
+</body>
+</html>
