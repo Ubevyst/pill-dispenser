@@ -1,45 +1,117 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pill Dispenser Control</title>
-    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-</head>
-<body>
-    <h2>Pill Dispenser Control</h2>
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
+#include <Wire.h>
+#include "RTClib.h"
+#include <Stepper.h>
+
+// WiFi & MQTT Credentials
+const char* ssid = "Kalamoha";
+const char* password = "M@rk5587";
+const char* mqtt_server = "f8ce84ba874c4225b531260f66793bc4.s1.eu.hivemq.cloud";
+const int mqtt_port = 8883;
+const char* mqtt_user = "Aphelios";
+const char* mqtt_password = "Edgviper2021";
+
+// Stepper Motor Config
+#define STEPS_PER_REV 2048
+#define IN1 5   // GPIO5 (D1)
+#define IN2 4   // GPIO4 (D2)
+#define IN3 0   // GPIO0 (D3)
+#define IN4 2   // GPIO2 (D4)
+Stepper stepper(STEPS_PER_REV, IN1, IN3, IN2, IN4);
+
+// RTC Module
+RTC_DS3231 rtc;
+String scheduledTime = "";  
+
+WiFiClientSecure espClient;  
+PubSubClient client(espClient);
+
+// 📌 Move the reconnect function above setup() to avoid scope issues
+void reconnect() {
+    while (!client.connected()) {
+        Serial.print("Connecting to MQTT...");
+        if (client.connect("ESP8266_Client", mqtt_user, mqtt_password)) {
+            Serial.println("Connected!");
+            client.subscribe("pill/dispenser"); 
+            client.subscribe("pill/schedule");
+        } else {
+            Serial.print("Failed, rc=");
+            Serial.print(client.state());
+            Serial.println(" Retrying in 5 seconds...");
+            delay(5000);
+        }
+    }
+}
+
+// 📌 Now setup() can call reconnect()
+void setup() {
+    Serial.begin(115200);
+    stepper.setSpeed(10); 
+
+    // WiFi Connection
+    WiFi.begin(ssid, password);
+    Serial.print("Connecting to WiFi");
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(1000);
+        Serial.print(".");
+    }
+    Serial.println("\nWiFi Connected!");
+
+    // MQTT Setup
+    espClient.setInsecure();
+    client.setServer(mqtt_server, mqtt_port);
+    client.setCallback(callback);
     
-    <!-- Pill Dispense Button -->
-    <button onclick="dispensePill()">Dispense Pill</button>
-    <p id="status">Status: Waiting...</p>
+    // RTC Setup
+    if (!rtc.begin()) {
+        Serial.println("Couldn't find RTC!");
+        while (1);
+    }
 
-    <!-- ESP32-CAM Live Stream -->
-    <h2>Patient Monitoring</h2>
-    <img id="camStream" src="http://YOUR_ESP32_CAM_IP:81/stream" width="400">
+    reconnect();  // ✅ Now it should work correctly!
+}
 
-    <script>
-        const broker = "wss://f8ce84ba874c4225b531260f66793bc4.s1.eu.hivemq.cloud:8884/mqtt"; 
-        const topic = "pill/dispenser"; 
-        const topicCam = "pill/cam"; 
+// Handle Incoming MQTT Messages
+void callback(char* topic, byte* payload, unsigned int length) {
+    String message = "";
+    for (int i = 0; i < length; i++) {
+        message += (char)payload[i];
+    }
+    Serial.println("Received message: " + message);
 
-        const client = mqtt.connect(broker, {
-            username: "your-username", // Replace with HiveMQ username
-            password: "your-password", // Replace with HiveMQ password
-        });
+    if (message == "dispense") {
+        dispensePill();
+    } 
+    else if (message.startsWith("schedule:")) {
+        scheduledTime = message.substring(9);
+        Serial.println("New scheduled time: " + scheduledTime);
+    }
+}
 
-        client.on("connect", () => {
-            document.getElementById("status").innerText = "Connected to MQTT Broker!";
-        });
+// Check Time & Dispense if Scheduled
+void checkScheduledDispense() {
+    DateTime now = rtc.now();
+    String currentTime = String(now.hour()) + ":" + String(now.minute());
 
-        function dispensePill() {
-            client.publish(topic, "DISPENSE");
-            document.getElementById("status").innerText = "Pill Dispensed!";
-            client.publish(topicCam, "START_STREAM");
-        }
+    if (currentTime == scheduledTime) {
+        Serial.println("Scheduled time reached! Dispensing...");
+        dispensePill();
+        scheduledTime = "";  
+    }
+}
 
-        function stopStream() {
-            client.publish(topicCam, "STOP_STREAM");
-        }
-    </script>
-</body>
-</html>
+// Dispense Pill
+void dispensePill() {
+    Serial.println("Rotating stepper motor...");
+    stepper.step(STEPS_PER_REV / 4);  
+}
+
+// Main Loop
+void loop() {
+    if (!client.connected()) {
+        reconnect();
+    }
+    client.loop();
+    checkScheduledDispense();
+}
